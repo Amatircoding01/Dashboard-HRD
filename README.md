@@ -1,2 +1,1 @@
-# Dashboard-HRD
-Kelola karyawan
+# HRIS
