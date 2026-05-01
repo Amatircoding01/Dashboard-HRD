@@ -20,13 +20,17 @@
         $('#login-wrapper').fadeIn(500); 
     }
 
-    function showApp() { 
-        $('#login-wrapper').hide(); 
-        $('#app-wrapper').fadeIn(500); 
-        navigateTo('Dashboard'); 
-        loadKaryawanData(); 
-        $('#toggleSidebar').off('click').on('click', function() { $('.sidebar').toggleClass('show'); }); 
-    }
+function showApp() { 
+    $('#login-wrapper').hide(); 
+    $('#app-wrapper').fadeIn(500); 
+    navigateTo('Dashboard'); 
+    loadKaryawanData(); 
+    
+    // TAMBAHKAN INI: Sinkronkan pilihan PT dengan database
+    initPerusahaanDropdowns(); 
+    
+    $('#toggleSidebar').off('click').on('click', function() { $('.sidebar').toggleClass('show'); }); 
+}
 
     function processLogin(e) { 
         e.preventDefault(); 
@@ -52,11 +56,22 @@
         $('.page-view').hide(); 
         $('#view-' + pageName).fadeIn(300);
         
+        // Sesuaikan Judul Halaman
         let title = pageName;
         if(pageName === 'Karyawan') title = 'Data Karyawan';
-        else if(pageName === 'Absensi') title = 'Modul Absensi & Cuti';
         else if(pageName === 'MonitoringKlaim') title = 'Monitoring & Approval Klaim';
         
+        // TAMBAHAN UNTUK MENU ABSENSI:
+        else if(pageName === 'edit-absensi') title = 'Edit / Tambah Absensi';
+        else if(pageName === 'kelola-libur') {
+        title = 'Kelola Hari Libur';
+        loadDataLibur(); // <-- Panggil data otomatis saat menu dibuka
+        }
+        else if(pageName === 'rekap-all') title = 'Rekapitulasi Absensi (Semua)';
+        else if(pageName === 'rekap-summary') title = 'Summary Absensi Per Karyawan';
+        else if(pageName === 'laporan-absensi') title = 'Cetak Laporan Absensi';
+        else if(pageName === 'variabel-gaji') title = 'Export Variabel Gaji';
+
         $('#page-title').text(title); 
         if ($(window).width() < 768) $('.sidebar').removeClass('show');
     }
@@ -808,4 +823,522 @@ document.addEventListener('click', function(e) {
         }, 500);
     }
 }, true); // <--- INI ADALAH PENYELAMAT KITA (Capture Phase)
+
+// =========================================================
+// MODUL SUB-MENU: EDIT ABSENSI
+// =========================================================
+
+// =========================================================
+// MODUL SUB-MENU: EDIT ABSENSI
+// =========================================================
+
+function loadEditAbsensi() {
+    const pt = $('#eaPerusahaan').val();
+    const tgl = $('#eaTgl').val();
+
+    if (!pt || !tgl) {
+        Swal.fire('Peringatan', 'Harap pilih Perusahaan dan Tanggal terlebih dahulu.', 'warning');
+        return;
+    }
+
+    $('#areaEditAbsensi').fadeIn();
+    $('#tbodyEditAbsensi').html('<tr><td colspan="7" class="text-center py-4"><div class="spinner-border text-info spinner-border-sm me-2"></div> Menarik data gabungan karyawan...</td></tr>');
+
+    // Panggil Backend
+    google.script.run.withSuccessHandler(function(resJSON) {
+        const res = JSON.parse(resJSON);
+        if (res.status === 'success') {
+            const tbody = $('#tbodyEditAbsensi').empty();
+            
+            if(res.data.length === 0) {
+                tbody.append('<tr><td colspan="7" class="text-center text-muted py-4">Tidak ada karyawan di PT ini.</td></tr>');
+                return;
+            }
+
+            res.data.forEach(function(d, index) {
+                // Tentukan warna baris: Jika belum ada data (kosong), beri highlight tipis
+                let rowColor = d.RowIndex ? "" : "bg-light";
+                
+                let tr = `<tr class="${rowColor}" id="row-${d.NRPP}">
+                    <td>${index + 1}</td>
+                    <td class="fw-bold text-primary">${d.NRPP}</td>
+                    <td class="text-start">${d.Nama}</td>
+                    
+                    <td><input type="time" class="form-control form-control-sm text-center" id="in-jm-${d.NRPP}" value="${d.JamMasuk}"></td>
+                    <td><input type="time" class="form-control form-control-sm text-center" id="in-jk-${d.NRPP}" value="${d.JamKeluar}"></td>
+                    <td>
+                        <select class="form-select form-select-sm" id="in-st-${d.NRPP}">
+                            <option value="">-</option>
+                            <option value="Hadir" ${d.Status === 'Hadir' ? 'selected' : ''}>Hadir</option>
+                            <option value="Cuti" ${d.Status === 'Cuti' ? 'selected' : ''}>Cuti</option>
+                            <option value="Sakit" ${d.Status === 'Sakit' ? 'selected' : ''}>Sakit</option>
+                            <option value="Izin" ${d.Status === 'Izin' ? 'selected' : ''}>Izin</option>
+                            <option value="Alpa" ${d.Status === 'Alpa' ? 'selected' : ''}>Alpa</option>
+                        </select>
+                    </td>
+                    
+                    <td>
+                        <button class="btn btn-sm btn-success shadow-sm" onclick="simpanBarisAbsensi('${d.NRPP}', '${d.Nama}', ${d.RowIndex})">
+                            <i class="fas fa-save"></i>
+                        </button>
+                    </td>
+                </tr>`;
+                tbody.append(tr);
+            });
+        } else {
+            Swal.fire('Error Server', res.message, 'error');
+            $('#tbodyEditAbsensi').html(`<tr><td colspan="7" class="text-danger py-3">${res.message}</td></tr>`);
+        }
+    }).withFailureHandler(function(err) {
+        Swal.fire('Error', 'Gagal memanggil server.', 'error');
+    }).getEditAbsensiData(pt, tgl);
+}
+
+// Fungsi Eksekusi Simpan dari Tombol Tabel
+function simpanBarisAbsensi(nrpp, nama, rowIndex) {
+    const tgl = $('#eaTgl').val();
+    const jamMasuk = $(`#in-jm-${nrpp}`).val();
+    const jamKeluar = $(`#in-jk-${nrpp}`).val();
+    const status = $(`#in-st-${nrpp}`).val();
+    
+    // Ubah ikon tombol jadi loading
+    const btn = $(`#row-${nrpp} button`);
+    const btnHtmlLama = btn.html();
+    btn.html('<i class="fas fa-spinner fa-spin"></i>').prop('disabled', true);
+
+    google.script.run.withSuccessHandler(function(resJSON) {
+        const res = JSON.parse(resJSON);
+        if(res.status === 'success') {
+            // Animasi hijau sebentar pada baris untuk menandakan sukses
+            $(`#row-${nrpp}`).addClass('table-success');
+            setTimeout(() => { $(`#row-${nrpp}`).removeClass('table-success'); }, 1500);
+            
+            // Kembalikan ikon tombol
+            btn.html('<i class="fas fa-check"></i>').removeClass('btn-success').addClass('btn-secondary');
+            setTimeout(() => { btn.html(btnHtmlLama).removeClass('btn-secondary').addClass('btn-success').prop('disabled', false); }, 2000);
+        } else {
+            Swal.fire('Gagal Menyimpan', res.message, 'error');
+            btn.html(btnHtmlLama).prop('disabled', false);
+        }
+    }).withFailureHandler(function(err) {
+        Swal.fire('Error Koneksi', 'Gagal menyimpan ke server', 'error');
+        btn.html(btnHtmlLama).prop('disabled', false);
+    }).saveSingleAbsensi(nrpp, nama, tgl, jamMasuk, jamKeluar, status, rowIndex);
+}
+
+// Fungsi ringan pencarian (search text pada tabel)
+function filterTabel(inputId, tableId) {
+    var input, filter, table, tr, td, i, j, txtValue;
+    input = document.getElementById(inputId);
+    filter = input.value.toUpperCase();
+    table = document.getElementById(tableId);
+    tr = table.getElementsByTagName("tr");
+
+    // Mulai dari i=1 agar thead tidak ikut terfilter
+    for (i = 1; i < tr.length; i++) {
+        tr[i].style.display = "none";
+        td = tr[i].getElementsByTagName("td");
+        for (j = 0; j < td.length; j++) {
+            if (td[j]) {
+                txtValue = td[j].textContent || td[j].innerText;
+                if (txtValue.toUpperCase().indexOf(filter) > -1) {
+                    tr[i].style.display = "";
+                    break;
+                }
+            }
+        }
+    }
+}
+
+// =========================================================
+// MODUL SUB-MENU: KELOLA HARI LIBUR
+// =========================================================
+
+// Fungsi untuk memuat daftar libur ke tabel
+function loadDataLibur() {
+    $('#tbodyKelolaLibur').html('<tr><td colspan="5" class="text-center py-4"><div class="spinner-border text-danger spinner-border-sm me-2"></div> Memuat data kalender...</td></tr>');
+    
+    google.script.run.withSuccessHandler(function(resJSON) {
+        const res = JSON.parse(resJSON);
+        if (res.status === 'success') {
+            const tbody = $('#tbodyKelolaLibur').empty();
+            
+            if (res.data.length === 0) {
+                tbody.append('<tr><td colspan="5" class="text-center text-muted py-4">Belum ada data hari libur yang terdaftar.</td></tr>');
+            } else {
+                res.data.forEach(function(item, index) {
+                    // Warna lencana berdasarkan status (LN atau CB)
+                    let badgeClass = item.Status === 'LN' ? 'bg-danger' : 'bg-warning text-dark';
+                    let statName = item.Status === 'LN' ? 'Libur Nasional (LN)' : 'Cuti Bersama (CB)';
+                    
+                    let tr = `<tr>
+                        <td>${index + 1}</td>
+                        <td class="fw-bold">${item.Tanggal}</td>
+                        <td><span class="badge ${badgeClass}">${statName}</span></td>
+                        <td>${item.Keterangan}</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="Swal.fire('Info', 'Fitur Hapus segera hadir', 'info')" title="Hapus">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>`;
+                    tbody.append(tr);
+                });
+            }
+        } else {
+            Swal.fire('Gagal Memuat Data', res.message, 'error');
+            $('#tbodyKelolaLibur').html(`<tr><td colspan="5" class="text-center text-danger py-4">Error: ${res.message}</td></tr>`);
+        }
+    }).withFailureHandler(function(err) {
+        Swal.fire('Koneksi Terputus', 'Gagal memanggil fungsi server.', 'error');
+    }).getLiburData();
+}
+
+// Fungsi untuk menyimpan hari libur baru
+function saveLibur() {
+    const tgl = $('#liburTgl').val();
+    const stat = $('#liburStat').val();
+    const ket = $('#liburKet').val();
+
+    if (!tgl || !ket) {
+        Swal.fire('Peringatan', 'Tanggal dan Keterangan wajib diisi!', 'warning');
+        return;
+    }
+
+    Swal.fire({
+        title: 'Menyimpan...',
+        text: 'Menyimpan hari libur ke kalender sistem',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
+
+    // Panggil fungsi Backend
+    google.script.run.withSuccessHandler(function(resJSON) {
+        const res = JSON.parse(resJSON);
+        if (res.status === 'success') {
+            Swal.fire('Sukses', 'Hari libur berhasil disimpan!', 'success');
+            // Bersihkan form input
+            $('#liburTgl').val('');
+            $('#liburKet').val('');
+            // Muat ulang tabel otomatis
+            loadDataLibur(); 
+        } else {
+            Swal.fire('Gagal Menyimpan', res.message, 'error');
+        }
+    }).withFailureHandler(function(err) {
+        Swal.fire('Koneksi Terputus', 'Gagal memanggil fungsi simpan ke server.', 'error');
+    }).saveLiburData(tgl, stat, ket);
+}
+
+// =========================================================
+// MODUL SUB-MENU: REKAP ABSENSI ALL (CROSSTAB)
+// =========================================================
+
+function loadCrosstabRekap() {
+    const pt = $('#raPerusahaan').val();
+    const start = $('#raStart').val();
+    const end = $('#raEnd').val();
+
+    if (!pt || !start || !end) {
+        Swal.fire('Peringatan', 'Perusahaan, Tanggal Mulai, dan Tanggal Selesai wajib diisi!', 'warning');
+        return;
+    }
+
+    // Ubah Judul Area Tabel
+    $('#ctJudulPT').text(pt === 'KOBE' ? 'PT. KOBEXINDO TRACTORS TBK' : 'PT. KOBEXINDO EQUIPMENT');
+    $('#ctPeriode').text(start + ' s/d ' + end);
+    
+    // Munculkan Area Tabel
+    $('#areaCrosstab').fadeIn();
+    $('#tbodyCrosstab').html('<tr><td colspan="10" class="text-center py-4"><div class="spinner-border text-primary spinner-border-sm me-2"></div> Menghitung rekapitulasi crosstab...</td></tr>');
+
+    // TODO: Panggil google.script.run untuk kalkulasi crosstab matrix absensi
+}
+
+function downloadCrosstabExcel() {
+    const pt = $('#raPerusahaan').val();
+    const tbodyHtml = $('#tbodyCrosstab').html();
+    
+    if (!pt || tbodyHtml.includes('Silakan pilih parameter') || tbodyHtml.includes('Menghitung')) {
+        Swal.fire('Peringatan', 'Tampilkan data terlebih dahulu sebelum melakukan Export Excel!', 'warning');
+        return;
+    }
+
+    Swal.fire({
+        title: 'Menyiapkan Excel...',
+        text: 'Mengonversi tabel crosstab ke format .xlsx',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
+
+    // TODO: Implementasi logika export ke Excel menggunakan library XLSX (SheetJS)
+    // Simulasi sukses:
+    setTimeout(() => {
+        Swal.fire('Sukses', 'File Excel berhasil diunduh (Simulasi)', 'success');
+    }, 1000);
+}
+
+// =========================================================
+// MODUL SUB-MENU: SUMMARY ABSENSI PER KARYAWAN
+// =========================================================
+
+// Fungsi untuk Filter Checkbox berdasarkan Perusahaan (Kerangka)
+function filterCheckboxKaryawan() {
+    const pt = $('#rsPerusahaanFilter').val();
+    
+    $('#rsCheckboxContainer').html('<div class="text-center small py-2"><div class="spinner-border spinner-border-sm text-primary"></div> Memuat daftar karyawan...</div>');
+    
+    // TODO: Ambil data karyawan berdasarkan PT dari Google Script
+    // Simulasi UI sementara:
+    setTimeout(() => {
+        if(!pt) {
+            $('#rsCheckboxContainer').html('<div class="text-muted small text-center py-2">Silakan pilih perusahaan terlebih dahulu...</div>');
+            return;
+        }
+        
+        // Simulasi data masuk (nanti ini digenerate dari data riil globalDataKaryawan)
+        $('#rsCheckboxContainer').html(`
+            <div class="form-check chk-item"><input class="form-check-input chk-karyawan" type="checkbox" value="101" id="chk1"><label class="form-check-label small" for="chk1">101 - Budi Santoso</label></div>
+            <div class="form-check chk-item"><input class="form-check-input chk-karyawan" type="checkbox" value="102" id="chk2"><label class="form-check-label small" for="chk2">102 - Siti Aminah</label></div>
+            <div class="form-check chk-item"><input class="form-check-input chk-karyawan" type="checkbox" value="103" id="chk3"><label class="form-check-label small" for="chk3">103 - Agus Pratama</label></div>
+        `);
+        $('#chkSelectAll').prop('checked', false);
+    }, 500);
+}
+
+// Fungsi Pencarian (Search) di dalam list Checkbox
+function filterCheckboxList() {
+    let input = document.getElementById('rsSearchKaryawan').value.toLowerCase();
+    let container = document.getElementById('rsCheckboxContainer');
+    let items = container.getElementsByClassName('chk-item');
+
+    for (let i = 0; i < items.length; i++) {
+        let label = items[i].getElementsByTagName('label')[0].innerText.toLowerCase();
+        if (label.includes(input)) {
+            items[i].style.display = "";
+        } else {
+            items[i].style.display = "none";
+        }
+    }
+}
+
+// Fungsi Check / Uncheck semua karyawan yang sedang TAMPIL (terfilter)
+function toggleAllCheckboxes(source) {
+    let container = document.getElementById('rsCheckboxContainer');
+    let checkboxes = container.getElementsByClassName('chk-karyawan');
+    let items = container.getElementsByClassName('chk-item');
+    
+    for (let i = 0; i < checkboxes.length; i++) {
+        // Hanya centang yang sedang tidak disembunyikan oleh fitur search
+        if (items[i].style.display !== "none") {
+            checkboxes[i].checked = source.checked;
+        }
+    }
+}
+
+// Fungsi Tarik Data Summary
+function loadRekapSummaryMulti() {
+    let selectedKaryawan = [];
+    $('.chk-karyawan:checked').each(function() {
+        selectedKaryawan.push($(this).val());
+    });
+
+    const start = $('#rsStart').val();
+    const end = $('#rsEnd').val();
+
+    if (selectedKaryawan.length === 0 || !start || !end) {
+        Swal.fire('Peringatan', 'Pilih minimal 1 karyawan dan lengkapi tanggal!', 'warning');
+        return;
+    }
+
+    $('#tbodyRekapSummary').html('<tr><td colspan="9" class="text-center py-4"><div class="spinner-border text-dark spinner-border-sm me-2"></div> Menghitung summary kehadiran...</td></tr>');
+    
+    // TODO: Panggil google.script.run untuk menghitung summary
+    console.log("Meminta summary untuk NRPP:", selectedKaryawan);
+}
+
+function downloadRekapSummaryExcel() {
+    Swal.fire('Info', 'Fitur export Excel sedang disiapkan.', 'info');
+}
+
+// =========================================================
+// MODUL SUB-MENU: CETAK LAPORAN / PDF
+// =========================================================
+
+function loadLaporan() {
+    const pt = $('#lapPerusahaan').val();
+    const nama = $('#lapKaryawan').val();
+    const start = $('#lapStart').val();
+    const end = $('#lapEnd').val();
+
+    if (!pt || !nama || !start || !end) {
+        Swal.fire('Peringatan', 'Harap lengkapi semua parameter pencarian!', 'warning');
+        return;
+    }
+
+    // Tampilkan animasi loading di tabel
+    $('#printArea').fadeIn();
+    $('#tbodyLaporan').html('<tr><td colspan="8" class="text-center py-4"><div class="spinner-border text-primary spinner-border-sm me-2"></div> Menarik data absensi karyawan...</td></tr>');
+    
+    // Ubah Kop Surat dan Periode
+    $('#kopPerusahaan').text(pt === 'KOBE' ? 'PT. KOBEXINDO TRACTORS TBK' : 'PT. KOBEXINDO EQUIPMENT');
+    $('#lblPeriode').text(start + ' s/d ' + end);
+
+    // TODO: 
+    // 1. Ambil Identitas Karyawan (NRPP, Jabatan, Gol, dll) berdasarkan nama yang diketik.
+    // 2. Panggil google.script.run untuk menarik detail hari kehadiran.
+    
+    console.log("Memuat pratinjau laporan untuk:", nama);
+}
+
+function downloadLaporanExcel() {
+    const isiTabel = $('#tbodyLaporan').html();
+    if(isiTabel.includes('Data belum dimuat') || isiTabel.includes('Menarik data')) {
+        Swal.fire('Peringatan', 'Pratinjau data terlebih dahulu sebelum unduh Excel!', 'warning');
+        return;
+    }
+    
+    Swal.fire({
+        title: 'Menyiapkan Excel...',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
+    
+    // TODO: Implementasikan SheetJS / XLSX
+    setTimeout(() => {
+        Swal.fire('Sukses', 'Laporan berhasil diunduh (Simulasi)', 'success');
+    }, 1000);
+}
+
+// =========================================================
+// MODUL SUB-MENU: VARIABEL GAJI (PAYROLL)
+// =========================================================
+
+function previewVariabelGaji() {
+    const tglMulai = $('#varTglMulai').val();
+    const tglAkhir = $('#varTglAkhir').val();
+    const pt = $('#varPilihPt').val();
+    const karyawan = $('#varPilihKaryawan').val();
+
+    if (!tglMulai || !tglAkhir) {
+        Swal.fire('Peringatan', 'Tanggal Mulai dan Tanggal Akhir wajib diisi!', 'warning');
+        return;
+    }
+
+    // Tampilkan area tabel dengan animasi loading
+    $('#areaPreviewGaji').fadeIn();
+    $('#tbodyPreviewGaji').html('<tr><td colspan="5" class="text-center py-4"><div class="spinner-border text-warning spinner-border-sm me-2"></div> Menghitung variabel gaji karyawan...</td></tr>');
+
+    // TODO: Panggil google.script.run untuk kalkulasi variabel gaji
+    // Simulasi respons (Nanti dihapus saat backend terpasang):
+    setTimeout(() => {
+        $('#tbodyPreviewGaji').html(`
+            <tr><td>1</td><td>12345</td><td>Budi Santoso</td><td>IT Support</td><td class="fw-bold text-success">22</td></tr>
+            <tr><td>2</td><td>12346</td><td>Siti Aminah</td><td>Finance</td><td class="fw-bold text-success">20</td></tr>
+            <tr><td colspan="5" class="text-muted small py-2">Ini hanya pratinjau. Klik Download Excel untuk data lengkap.</td></tr>
+        `);
+    }, 1000);
+}
+
+function downloadVariabelGaji() {
+    const isiTabel = $('#tbodyPreviewGaji').html();
+    
+    if (isiTabel.includes('Menghitung') || isiTabel.trim() === '') {
+        Swal.fire('Peringatan', 'Harap Preview data terlebih dahulu!', 'warning');
+        return;
+    }
+
+    Swal.fire({
+        title: 'Mempersiapkan File Excel...',
+        text: 'Mengunduh format Variabel Gaji untuk sistem Payroll.',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
+
+    // TODO: Gunakan library SheetJS untuk menarik data asli dari backend ke Excel
+    setTimeout(() => {
+        Swal.fire('Sukses!', 'File Variabel_Gaji_Absensi.xlsx berhasil diunduh.', 'success');
+    }, 1500);
+}
+
+// Fungsi untuk memuat data Dashboard Absensi (Dengan Fallback System)
+function loadAbsensiData() {
+    $('#tbodyAbsensi').html('<tr><td colspan="6" class="text-center py-4"><div class="spinner-border text-primary spinner-border-sm me-2"></div> Menarik data dari server...</td></tr>');
+    
+    google.script.run.withSuccessHandler(function(responseJSON) {
+        const res = JSON.parse(responseJSON);
+        
+        if (res.status === 'success') {
+            $('#absensi-stat-hadir').text(res.stats.hadir);
+            $('#absensi-stat-cuti').text(res.stats.cuti);
+            $('#absensi-stat-izin').text(res.stats.izin);
+            $('#absensi-stat-late').text(res.stats.terlambat);
+            
+            const tbody = $('#tbodyAbsensi').empty();
+            
+            if (res.logs.length === 0) {
+                tbody.append('<tr><td colspan="6" class="text-center text-muted py-4">Database masih kosong.</td></tr>');
+            } else {
+                // Tampilkan Peringatan Jika Menggunakan Data Fallback (Bukan Hari Ini)
+                if (res.fallbackMode) {
+                    $('#tableAbsensi').before('<div class="alert alert-warning py-2 small fw-bold mb-2"><i class="fas fa-exclamation-triangle me-2"></i> PERINGATAN: Tidak ada data absensi yang tanggalnya cocok dengan "Hari Ini". Menampilkan 5 data terakhir dari sheet sebagai referensi.</div>');
+                } else {
+                    // Hapus alert jika sukses dapat data hari ini
+                    $('.alert-warning').remove(); 
+                }
+
+                res.logs.forEach(function(log) {
+                    let badgeClass = 'bg-secondary';
+                    if(log.Status.toLowerCase().includes('hadir')) badgeClass = 'bg-primary';
+                    else if(log.Status.toLowerCase().includes('cuti')) badgeClass = 'bg-warning text-dark';
+                    else if(log.Status.toLowerCase().includes('sakit') || log.Status.toLowerCase().includes('izin')) badgeClass = 'bg-danger';
+                    
+                    // Jika fallback, kita selipkan tanggal aslinya di samping nama agar kamu tahu format yang terbaca
+                    let tglInfo = res.fallbackMode ? `<br><small class="text-danger">${log.TglAsli}</small>` : '';
+
+                    let tr = `<tr>
+                        <td class="fw-bold">${log.NRPP}</td>
+                        <td>${log.Nama} ${tglInfo}</td>
+                        <td class="${log.Keterangan === 'Terlambat' ? 'text-danger fw-bold' : ''}">${log.JamMasuk}</td>
+                        <td>${log.JamKeluar}</td>
+                        <td><span class="badge ${badgeClass}">${log.Status}</span></td>
+                        <td>${log.Keterangan}</td>
+                    </tr>`;
+                    tbody.append(tr);
+                });
+            }
+        } else {
+            Swal.fire('Gagal', res.message, 'error');
+            $('#tbodyAbsensi').html(`<tr><td colspan="6" class="text-center text-danger py-4">Error: ${res.message}</td></tr>`);
+        }
+    }).withFailureHandler(function(error) {
+        Swal.fire('Koneksi Terputus', 'Gagal memanggil fungsi server.', 'error');
+    }).getDashboardAbsensiData();
+}
+
+/**
+ * Mengisi semua dropdown perusahaan secara dinamis dari Database
+ */
+function initPerusahaanDropdowns() {
+    google.script.run.withSuccessHandler(function(resJSON) {
+        const res = JSON.parse(resJSON);
+        if (res.status === 'success') {
+            // Cari semua elemen select yang bertugas memilih PT
+            const selects = $('.select-pt-all, .select-pt-single');
+            
+            selects.each(function() {
+                const dropdown = $(this);
+                dropdown.empty(); // Kosongkan dulu
+                dropdown.append('<option value="">-- Pilih Perusahaan --</option>');
+                
+                res.data.forEach(function(ptName) {
+                    dropdown.append(`<option value="${ptName}">${ptName}</option>`);
+                });
+            });
+            
+            console.log("Dropdown perusahaan berhasil disinkronkan dengan Database.");
+        }
+    }).getUniquePerusahaan();
+}
+
 </script>
