@@ -1030,29 +1030,143 @@ function saveLibur() {
     }).saveLiburData(tgl, stat, ket);
 }
 
+// Fungsi bantuan untuk menentukan warna BACKGROUND sel (sesuai gambar)
+  function getBgStatusStyle(stat) {
+      if (stat === 'H') return 'background-color: #ffb3c6; color: black; font-weight: bold;'; // Pink untuk Hadir
+      if (stat === 'C') return 'background-color: #40e0d0; color: black; font-weight: bold;'; // Tosca untuk Cuti
+      if (stat === 'S') return 'background-color: #fffacd; color: black; font-weight: bold;'; // Kuning muda untuk Sakit
+      if (stat === 'A' || stat === 'PG') return 'background-color: #ffcccc; color: red; font-weight: bold;'; // Merah muda untuk Alpa
+      return 'color: black;'; // Default
+  }
+
 // =========================================================
 // MODUL SUB-MENU: REKAP ABSENSI ALL (CROSSTAB)
 // =========================================================
 
-function loadCrosstabRekap() {
-    const pt = $('#raPerusahaan').val();
-    const start = $('#raStart').val();
-    const end = $('#raEnd').val();
+// Fungsi bantuan untuk menentukan warna BACKGROUND sel Status
+function getBgStatusStyle(stat) {
+    if (stat === 'H') return 'background-color: #ffcdd2; color: black; font-weight: bold;'; // Latar Pink, teks hitam tebal
+    if (stat === 'C') return 'background-color: #b2ebf2; color: black; font-weight: bold;'; // Latar Cyan/Tosca (sesuai gambar sebelumnya)
+    if (stat === 'S') return 'background-color: #fff9c4; color: black; font-weight: bold;'; // Latar Kuning untuk Sakit
+    if (stat === 'PG' || stat === 'A') return 'background-color: #ffcdd2; color: red; font-weight: bold;'; // Latar Pink, teks merah
+    return 'color: #6c757d;'; // Default untuk '-' (abu-abu)
+}
 
-    if (!pt || !start || !end) {
-        Swal.fire('Peringatan', 'Perusahaan, Tanggal Mulai, dan Tanggal Selesai wajib diisi!', 'warning');
-        return;
+function loadCrosstabRekap() {
+    const start = document.getElementById('raStart').value; 
+    const end = document.getElementById('raEnd').value;
+    const pt = document.getElementById('raPerusahaan').value;
+    
+    if(!start || !end) { 
+        Swal.fire('Peringatan', 'Pilih rentang tanggal!', 'warning'); 
+        return; 
     }
 
-    // Ubah Judul Area Tabel
-    $('#ctJudulPT').text(pt === 'KOBE' ? 'PT. KOBEXINDO TRACTORS TBK' : 'PT. KOBEXINDO EQUIPMENT');
-    $('#ctPeriode').text(start + ' s/d ' + end);
+    const selectElem = document.getElementById('raPerusahaan');
+    const textPt = selectElem.options[selectElem.selectedIndex].text;
+    document.getElementById('ctJudulPT').innerText = pt === "ALL" ? "SEMUA PERUSAHAAN" : textPt.toUpperCase();
+    document.getElementById('ctPeriode').innerText = `${start} s/d ${end}`;
+    document.getElementById('areaCrosstab').style.display = 'block';
     
-    // Munculkan Area Tabel
-    $('#areaCrosstab').fadeIn();
-    $('#tbodyCrosstab').html('<tr><td colspan="10" class="text-center py-4"><div class="spinner-border text-primary spinner-border-sm me-2"></div> Menghitung rekapitulasi crosstab...</td></tr>');
+    const thead = document.querySelector('#tblCrosstab thead');
+    const tbody = document.querySelector('#tblCrosstab tbody');
+    tbody.innerHTML = '<tr><td colspan="15" class="text-center py-4"><div class="spinner-border text-primary spinner-border-sm me-2"></div> Memproses Matriks Crosstab...</td></tr>';
+    thead.innerHTML = '';
 
-    // TODO: Panggil google.script.run untuk kalkulasi crosstab matrix absensi
+    google.script.run
+        .withFailureHandler(err => { 
+            tbody.innerHTML = `<tr><td colspan="15" class="text-danger py-4 text-center">Error Server: ${err.message}</td></tr>`; 
+        })
+        .withSuccessHandler(function(res) {
+            if(res.employees.length === 0) { 
+                tbody.innerHTML = '<tr><td colspan="15" class="text-center text-danger py-4">Data Kosong.</td></tr>'; 
+                return; 
+            }
+
+            // ==========================================
+            // RENDER HEADER TABEL
+            // ==========================================
+            // Baris 1: No, NRPP, Nama (Latar Gelap) + Tanggal (Latar Terang) + REKAPITULASI (Latar Gelap)
+            let headRow1 = `<tr class="text-center align-middle" style="font-size: 0.85rem;">
+                                <th rowspan="2" style="background-color: #212529 !important; color: white !important; width: 40px; border: 1px solid #dee2e6;">No</th>
+                                <th rowspan="2" style="background-color: #212529 !important; color: white !important; width: 90px; border: 1px solid #dee2e6;">NRPP</th>
+                                <th rowspan="2" style="background-color: #212529 !important; color: white !important; width: 180px; border: 1px solid #dee2e6;">Nama</th>`;
+            
+            // Baris 2: IN, OUT, Status + Header Rekapitulasi (Semua Latar Terang)
+            let headRow2 = `<tr class="text-center align-middle" style="font-size: 0.8rem; background-color: #ffffff;">`;
+            
+            // Render Header Kolom Tanggal
+            res.dates.forEach(d => { 
+                headRow1 += `<th colspan="3" style="background-color: #ffffff !important; color: #000000 !important; border: 1px solid #dee2e6;">${d.display}</th>`; 
+                headRow2 += `<th style="border: 1px solid #dee2e6;">IN</th><th style="border: 1px solid #dee2e6;">OUT</th><th style="border: 1px solid #dee2e6;">Status</th>`; 
+            });
+
+            // Lanjutan Baris 1: Header REKAPITULASI
+            headRow1 += `<th colspan="8" style="background-color: #212529 !important; color: white !important; border: 1px solid #dee2e6;">REKAPITULASI</th></tr>`;
+            
+            // Lanjutan Baris 2: Sub-Header Rekapitulasi
+            const cellStyle = `style="background-color: #ffffff; color: #000000; font-weight: bold; border: 1px solid #dee2e6;"`;
+            headRow2 += `<th ${cellStyle}>Late</th><th ${cellStyle}>Sakit</th>
+                         <th ${cellStyle}>Cuti</th><th ${cellStyle}>ST</th>
+                         <th ${cellStyle}>VC</th><th ${cellStyle}>PG</th>
+                         <th ${cellStyle}>Jml Hadir</th><th ${cellStyle}>Hari Kerja</th></tr>`;
+            
+            thead.innerHTML = headRow1 + headRow2;
+            tbody.innerHTML = ''; 
+            
+            let no = 1; 
+            let workdays = res.workdays;
+
+            // ==========================================
+            // RENDER BODY TABEL (DATA KARYAWAN)
+            // ==========================================
+            res.employees.forEach(emp => {
+                let tr = `<tr class="text-center align-middle" style="font-size: 0.8rem; background-color: #ffffff;">
+                            <td style="border: 1px solid #dee2e6;">${no++}</td>
+                            <td style="border: 1px solid #dee2e6;">${emp.nrpp}</td>
+                            <td class="text-start text-nowrap" style="border: 1px solid #dee2e6;">${emp.nama}</td>`;
+                
+                let attData = res.attendance[emp.nrpp] || {};
+                
+                // Looping Kehadiran Harian
+                res.dates.forEach(d => {
+                     let att = attData[d.raw];
+                     if(att) { 
+                          // Inject warna latar belakang status dari fungsi getBgStatusStyle()
+                          tr += `<td style="border: 1px solid #dee2e6;">${att.in}</td>
+                                 <td style="border: 1px solid #dee2e6;">${att.out}</td>
+                                 <td style="border: 1px solid #dee2e6; ${getBgStatusStyle(att.stat)}">${att.stat}</td>`; 
+                     } else if (d.isLibur) { 
+                          tr += `<td style="border: 1px solid #dee2e6;">-</td>
+                                 <td style="border: 1px solid #dee2e6;">-</td>
+                                 <td style="border: 1px solid #dee2e6; background-color: #e9ecef; color: red; font-weight: bold;">${d.liburStat}</td>`;
+                     } else { 
+                          tr += `<td style="border: 1px solid #dee2e6;">-</td>
+                                 <td style="border: 1px solid #dee2e6;">-</td>
+                                 <td style="border: 1px solid #dee2e6;">-</td>`; 
+                     }
+                });
+
+                // Set warna spesifik untuk kolom rekapitulasi (Sesuai gambar)
+                let lateColor = emp.lateStr !== "00:00:00" ? "color: #dc3545; font-weight: bold;" : "color: #6c757d;"; // Merah jika telat, abu-abu jika 0
+                let pgColor = "color: #dc3545; font-weight: bold;"; // Merah
+                let hadirColor = "color: #198754; font-weight: bold;"; // Hijau
+                let kerjaColor = "color: #0d6efd; font-weight: bold;"; // Biru
+                let boldBlack = "color: #000000; font-weight: bold;"; // Hitam Tebal
+
+                tr += `<td style="border: 1px solid #dee2e6; ${lateColor}">${emp.lateStr}</td>
+                       <td style="border: 1px solid #dee2e6; ${boldBlack}">${emp.S}</td>
+                       <td style="border: 1px solid #dee2e6; ${boldBlack}">${emp.C}</td>
+                       <td style="border: 1px solid #dee2e6; ${boldBlack}">${emp.ST}</td>
+                       <td style="border: 1px solid #dee2e6; ${boldBlack}">${emp.VC}</td>
+                       <td style="border: 1px solid #dee2e6; ${pgColor}">${emp.PG}</td>
+                       <td style="border: 1px solid #dee2e6; ${hadirColor}">${emp.H}</td>
+                       <td style="border: 1px solid #dee2e6; ${kerjaColor}">${workdays}</td></tr>`;
+                
+                tbody.insertAdjacentHTML('beforeend', tr);
+            });
+
+        }).getCrosstabRekapData(start, end, pt);
 }
 
 function downloadCrosstabExcel() {
@@ -1161,54 +1275,10 @@ function downloadRekapSummaryExcel() {
     Swal.fire('Info', 'Fitur export Excel sedang disiapkan.', 'info');
 }
 
-// =========================================================
-// MODUL SUB-MENU: CETAK LAPORAN / PDF
-// =========================================================
 
-function loadLaporan() {
-    const pt = $('#lapPerusahaan').val();
-    const nama = $('#lapKaryawan').val();
-    const start = $('#lapStart').val();
-    const end = $('#lapEnd').val();
 
-    if (!pt || !nama || !start || !end) {
-        Swal.fire('Peringatan', 'Harap lengkapi semua parameter pencarian!', 'warning');
-        return;
-    }
+// (Fungsi Cetak PDF bisa menggunakan window.print() yang sudah ada di HTML Anda)
 
-    // Tampilkan animasi loading di tabel
-    $('#printArea').fadeIn();
-    $('#tbodyLaporan').html('<tr><td colspan="8" class="text-center py-4"><div class="spinner-border text-primary spinner-border-sm me-2"></div> Menarik data absensi karyawan...</td></tr>');
-    
-    // Ubah Kop Surat dan Periode
-    $('#kopPerusahaan').text(pt === 'KOBE' ? 'PT. KOBEXINDO TRACTORS TBK' : 'PT. KOBEXINDO EQUIPMENT');
-    $('#lblPeriode').text(start + ' s/d ' + end);
-
-    // TODO: 
-    // 1. Ambil Identitas Karyawan (NRPP, Jabatan, Gol, dll) berdasarkan nama yang diketik.
-    // 2. Panggil google.script.run untuk menarik detail hari kehadiran.
-    
-    console.log("Memuat pratinjau laporan untuk:", nama);
-}
-
-function downloadLaporanExcel() {
-    const isiTabel = $('#tbodyLaporan').html();
-    if(isiTabel.includes('Data belum dimuat') || isiTabel.includes('Menarik data')) {
-        Swal.fire('Peringatan', 'Pratinjau data terlebih dahulu sebelum unduh Excel!', 'warning');
-        return;
-    }
-    
-    Swal.fire({
-        title: 'Menyiapkan Excel...',
-        allowOutsideClick: false,
-        didOpen: () => Swal.showLoading()
-    });
-    
-    // TODO: Implementasikan SheetJS / XLSX
-    setTimeout(() => {
-        Swal.fire('Sukses', 'Laporan berhasil diunduh (Simulasi)', 'success');
-    }, 1000);
-}
 
 // =========================================================
 // MODUL SUB-MENU: VARIABEL GAJI (PAYROLL)
@@ -1339,6 +1409,302 @@ function initPerusahaanDropdowns() {
             console.log("Dropdown perusahaan berhasil disinkronkan dengan Database.");
         }
     }).getUniquePerusahaan();
+}
+
+function getStatusColorClass(stat) {
+    if(stat === 'H') return 'text-success';
+    if(stat === 'S' || stat === 'C') return 'text-warning';
+    if(stat === 'PG' || stat === 'A') return 'text-danger';
+    return 'text-dark';
+}
+
+// =========================================================
+// MODUL SUB-MENU: LAPORAN RINCIAN KEHADIRAN (CETAK PDF / EXCEL)
+// =========================================================
+
+// 1. FITUR AUTO-SUGGEST DATALIST KARYAWAN
+function loadDatalistKaryawan() {
+    const ptElem = document.getElementById('lapPerusahaan');
+    if (!ptElem) return; // Proteksi: Mencegah error jika elemen belum dirender
+    
+    const pt = ptElem.value || "ALL";
+    const inputKaryawan = document.getElementById('lapKaryawan');
+    
+    if (inputKaryawan) inputKaryawan.placeholder = "Memuat daftar...";
+    
+    google.script.run
+        .withSuccessHandler(function(list) {
+            let datalist = document.getElementById('listKaryawanSingle');
+            if (!datalist) {
+                datalist = document.createElement('datalist');
+                datalist.id = 'listKaryawanSingle';
+                document.body.appendChild(datalist);
+            }
+            
+            datalist.innerHTML = ""; 
+            list.forEach(item => {
+                let option = document.createElement('option');
+                option.value = item;
+                datalist.appendChild(option);
+            });
+            
+            if (inputKaryawan) inputKaryawan.placeholder = "Pilih atau Ketik...";
+        })
+        .withFailureHandler(function(err) {
+            if (inputKaryawan) inputKaryawan.placeholder = "Gagal memuat list";
+            console.error("Datalist error: ", err.message);
+        })
+        .getDatalistKaryawan(pt);
+}
+
+// [PERBAIKAN BUG] Menggunakan jQuery pembungkus agar eksekusi sangat aman di SPA
+$(document).ready(function() {
+    $('#lapPerusahaan').on('change', loadDatalistKaryawan);
+});
+
+
+// =========================================================
+// 2. FUNGSI PRATINJAU DATA (ANTI SILENT ERROR & AUTO SCROLL)
+// =========================================================
+function loadLaporan() {
+    const pt = document.getElementById('lapPerusahaan').value;
+    const rawKar = document.getElementById('lapKaryawan').value; 
+    const start = document.getElementById('lapStart').value;
+    const end = document.getElementById('lapEnd').value;
+
+    if (!pt || !rawKar || !start || !end) {
+        Swal.fire('Peringatan', 'Harap isi semua filter pencarian!', 'warning');
+        return;
+    }
+
+    // Memotong string "NRPP - NAMA" menjadi "NRPP"
+    const kar = rawKar.split(' - ')[0].trim(); 
+
+    Swal.fire({
+        title: 'Menarik Data...',
+        text: 'Mengumpulkan rincian absensi karyawan',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
+
+    google.script.run
+        .withFailureHandler(function(err) {
+            Swal.fire('Error Server', err.message, 'error');
+        })
+        .withSuccessHandler(function(res) {
+            console.log("DATA SERVER:", res); // Memastikan data masuk
+
+            if (res.status === 'error') {
+                Swal.fire('Data Gagal', res.message, 'error');
+                return;
+            }
+
+            // MENGGUNAKAN TRY-CATCH UNTUK MENDETEKSI SILENT ERROR HTML
+            try {
+                // 1. TAMPILKAN AREA PRINT (Paksa tampil dengan JS dan jQuery)
+                const printArea = document.getElementById('printArea');
+                if(printArea) {
+                    printArea.classList.remove('d-none');
+                    printArea.style.display = 'block';
+                } else {
+                    throw new Error("Elemen dengan ID 'printArea' tidak ditemukan di HTML!");
+                }
+
+                document.getElementById('kopPerusahaan').innerText = res.profile.perusahaan || (pt === "KOBE" ? "PT. KOBEXINDO TRACTORS TBK" : "PT. KOBEXINDO EQUIPMENT");
+                
+                // 2. MAPPING IDENTITAS
+                document.getElementById('lblNRPP').innerText = res.profile.nrpp || "-";
+                document.getElementById('lblNama').innerText = res.profile.nama || "-";
+                document.getElementById('lblGol').innerText = res.profile.gol || "-";
+                document.getElementById('lblStatus').innerText = res.profile.status || "-";
+                document.getElementById('lblJabatan').innerText = res.profile.jabatan || "-";
+                document.getElementById('lblDept').innerText = res.profile.dept || "-";
+                document.getElementById('lblDivisi').innerText = res.profile.divisi || "-";
+                document.getElementById('lblPeriode').innerText = `${start} s/d ${end}`;
+
+                // 3. MAPPING REKAPITULASI BAWAH
+                document.getElementById('lblTotHadir').innerText = res.rekap.H || "0";
+                document.getElementById('lblTotSakit').innerText = res.rekap.S || "0";
+                document.getElementById('lblTotCuti').innerText = res.rekap.C || "0";
+                document.getElementById('lblTotST').innerText = res.rekap.ST || "0";
+                document.getElementById('lblTotPG').innerText = res.rekap.PG || "0";
+                document.getElementById('lblTotVisit').innerText = res.rekap.VC || "0";
+                document.getElementById('lblTotKerja').innerText = res.rekap.HariKerja || "0";
+
+                // 4. MAPPING ISI TABEL
+                const tbody = document.querySelector('#tabelLaporan tbody');
+                if (!tbody) throw new Error("Tag <tbody> di dalam '#tabelLaporan' tidak ditemukan!");
+                
+                tbody.innerHTML = '';
+                
+                res.matrix.forEach(r => {
+                    let trClass = r.hari === 'Minggu' ? 'bg-light text-danger' : '';
+                    let telatClass = r.telat !== "-" ? 'text-danger fw-bold' : '';
+                    
+                    let tr = `<tr class="${trClass}">
+                        <td>${r.no}</td>
+                        <td>${r.hari}</td>
+                        <td>${r.tanggal}</td>
+                        <td>${r.jamIn}</td>
+                        <td>${r.jamOut}</td>
+                        <td class="${telatClass}">${r.telat}</td>
+                        <td class="fw-bold">${r.stat}</td>
+                        <td>${r.durasi}</td>
+                    </tr>`;
+                    tbody.insertAdjacentHTML('beforeend', tr);
+                });
+
+                Swal.close(); 
+
+                // 5. ANIMASI SCROLL OTOMATIS KE AREA TABEL
+                $('html, body').animate({
+                    scrollTop: $("#printArea").offset().top - 20
+                }, 500);
+
+            } catch (renderError) {
+                console.error("ERROR TAMPILAN:", renderError);
+                Swal.fire({
+                    icon: 'error',
+                    title: 'HTML Tidak Sinkron',
+                    text: 'Gagal memasukkan data. Silakan cek Konsol (F12) untuk melihat ID apa yang hilang: ' + renderError.message
+                });
+            }
+
+        }).getLaporanKaryawanData(kar, start, end, pt); 
+}
+
+// 3. FUNGSI DOWNLOAD EXCEL (FORMAT PRINT PREVIEW)
+function downloadLaporanExcel() {
+    const nrpp = document.getElementById('lblNRPP').innerText;
+    if (!nrpp || nrpp === "-") {
+        Swal.fire('Peringatan', 'Silakan tampilkan data (Pratinjau) terlebih dahulu sebelum mengunduh Excel.', 'warning');
+        return;
+    }
+
+    Swal.fire({
+        title: 'Menyiapkan Excel...',
+        text: 'Menyusun format laporan kehadiran',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
+
+    try {
+        const pt = document.getElementById('kopPerusahaan').innerText;
+        const nama = document.getElementById('lblNama').innerText;
+        const gol = document.getElementById('lblGol').innerText;
+        const status = document.getElementById('lblStatus').innerText;
+        const jabatan = document.getElementById('lblJabatan').innerText;
+        const dept = document.getElementById('lblDept').innerText;
+        const divisi = document.getElementById('lblDivisi').innerText;
+        const periode = document.getElementById('lblPeriode').innerText;
+
+        let ws_data = [
+            [pt],                                           
+            ["LAPORAN RINCIAN KEHADIRAN KARYAWAN"],         
+            [],                                             
+            ["NRPP", ":", nrpp, "", "JABATAN", ":", jabatan], 
+            ["NAMA KARYAWAN", ":", nama, "", "DEPT", ":", dept],
+            ["GOL", ":", gol, "", "DIVISI", ":", divisi],
+            ["STATUS", ":", status, "", "PERIODE", ":", periode],
+            [],                                             
+            ["NO", "HARI", "TANGGAL", "JAM MASUK", "JAM KELUAR", "KETERLAMBATAN", "STATUS", "DURASI JAM"] 
+        ];
+
+        const tbodyRows = document.querySelectorAll('#tabelLaporan tbody tr');
+        tbodyRows.forEach(tr => {
+            let rowData = [];
+            tr.querySelectorAll('td').forEach(td => rowData.push(td.innerText));
+            ws_data.push(rowData);
+        });
+
+        ws_data.push([]); 
+        ws_data.push(["REKAPITULASI KEHADIRAN"]); 
+        ws_data.push(["HADIR (H)", "SAKIT (S)", "CUTI (C)", "ST", "PG / ALPA", "VISIT CUST", "HARI KERJA"]); 
+        ws_data.push([
+            document.getElementById('lblTotHadir').innerText,
+            document.getElementById('lblTotSakit').innerText,
+            document.getElementById('lblTotCuti').innerText,
+            document.getElementById('lblTotST').innerText,
+            document.getElementById('lblTotPG').innerText,
+            document.getElementById('lblTotVisit').innerText,
+            document.getElementById('lblTotKerja').innerText
+        ]);
+
+        let wb = XLSX.utils.book_new();
+        let ws = XLSX.utils.aoa_to_sheet(ws_data);
+
+        ws['!cols'] = [
+            { wch: 5 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, 
+            { wch: 15 }, { wch: 18 }, { wch: 10 }, { wch: 20 }  
+        ];
+
+        if(!ws["!merges"]) ws["!merges"] = [];
+        ws["!merges"].push({s: {r:0, c:0}, e: {r:0, c:7}}); 
+        ws["!merges"].push({s: {r:1, c:0}, e: {r:1, c:7}}); 
+
+        XLSX.utils.book_append_sheet(wb, ws, "Laporan");
+
+        let safePeriode = periode.replace(/ \/ /g, "_").replace(/ s\/d /g, "_");
+        let fileName = `Laporan_Kehadiran_${nama}_${safePeriode}.xlsx`;
+        XLSX.writeFile(wb, fileName);
+
+        Swal.close(); 
+
+    } catch (error) {
+        Swal.fire('Error', 'Terjadi kesalahan saat mengekspor ke Excel: ' + error.message, 'error');
+    }
+}
+// =========================================================
+// 4. FUNGSI DOWNLOAD PDF (MENGGUNAKAN HTML2PDF) - ANTI BLANK
+// =========================================================
+function downloadLaporanPDF() {
+    const nrpp = document.getElementById('lblNRPP').innerText;
+    const nama = document.getElementById('lblNama').innerText;
+    const periode = document.getElementById('lblPeriode').innerText;
+    
+    // Validasi: Cegah cetak jika data belum ditampilkan
+    if (!nrpp || nrpp === "-") {
+        Swal.fire('Peringatan', 'Silakan tampilkan data (Pratinjau) terlebih dahulu sebelum mengunduh PDF.', 'warning');
+        return;
+    }
+
+    Swal.fire({
+        title: 'Menyiapkan PDF...',
+        text: 'Sedang "memotret" laporan ke format PDF (Mohon tunggu sebentar)',
+        allowOutsideClick: false,
+        didOpen: () => Swal.showLoading()
+    });
+
+    // 1. Pilih elemen HTML yang akan diubah menjadi PDF
+    const printArea = document.getElementById('printArea');
+    
+    // 2. Sembunyikan tombol Excel & PDF sementara agar tidak ikut tercetak di dalam PDF
+    const tombolAction = printArea.querySelector('.no-print');
+    if (tombolAction) tombolAction.style.display = 'none';
+
+    // 3. Buat nama file yang rapi secara otomatis
+    let safePeriode = periode.replace(/ \/ /g, "_").replace(/ s\/d /g, "_");
+    let fileName = `Laporan_Kehadiran_${nama}_${safePeriode}.pdf`;
+
+    // 4. Pengaturan kualitas dan ukuran kertas PDF
+    const opt = {
+        margin:       5, // Margin tepi kertas (5mm)
+        filename:     fileName,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true }, // Scale 2 agar teks tajam (HD) dan tidak pecah
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+
+    // 5. Eksekusi pembuatan PDF
+    html2pdf().set(opt).from(printArea).save().then(() => {
+        // Kembalikan tombol Excel & PDF agar muncul lagi di layar
+        if (tombolAction) tombolAction.style.display = '';
+        Swal.fire('Sukses', 'File PDF berhasil diunduh!', 'success');
+    }).catch(err => {
+        // Jika terjadi error
+        if (tombolAction) tombolAction.style.display = '';
+        Swal.fire('Error', 'Gagal membuat PDF: ' + err.message, 'error');
+    });
 }
 
 </script>
